@@ -1,4 +1,4 @@
-# 排障速查
+﻿# 排障速查
 
 先跑 `scripts/verify-share.ps1`，按失败项对号入座。
 
@@ -17,6 +17,9 @@
 | 开启后上网正常但所有流量只走一个节点，服务端一关全断 | 单节点配置无兜底 | 进 Clash 切回原订阅，或把规则组改成 fallback（含 DIRECT） |
 | 重启后“有网卡但打不开网页” | 系统代理残留 `127.0.0.1:7897` 而客户端没启动 | 开客户端自启；或 `ProxyEnable=0` 关闭系统代理 |
 | 内网站点/教务系统打不开 | 被强行塞进代理 | 代理绕过列表加 `192.168.*,10.*,127.0.0.1,*.edu.cn` |
+| `协议探测失败: timed out`（toci 界面上） | 协议与端口错配：SOCKS5 填了 HTTP 端口，或 HTTP 填了 SOCKS5 端口；也可能服务端没开/跨网段 | SOCKS5 配 18081、HTTP 配 18080；先 `Test-NetConnection IP -Port 18081` 确认端口通 |
+| toci 点了“保存配置并应用”但没 `SNI-Proxy-TUN` 网卡 | 线路没选中、延迟测试没过、或需要管理员权限建虚拟网卡 | 先“测试连通性与认证”看到 ms 延迟再应用；用管理员身份启动 toci |
+| toci 应用后网页全挂 | 与 Clash 的 `Meta` TUN 同时存在，抢路由/系统代理 | 只留一个 TUN：关掉 Clash Verge 的 TUN（或退出 Verge 并停 `clash_verge_service`） |
 
 ## 按场景
 
@@ -38,5 +41,6 @@
 
 ## 安全回滚
 
-- 服务端：停用并删除计划任务、防火墙规则，删 `%LOCALAPPDATA%\lan-share`。
-- 客户端：用脚本生成的 `.bak_时间戳` 目录覆盖回 `profiles.yaml` / `verge.yaml` / `config.yaml`，删除 `profiles\pclan.yaml`。
+- 服务端：停用并删除计划任务、防火墙规则，删程序目录（默认 `D:\Doubao\tools\gost`）。
+- 客户端（Clash）：用脚本生成的 `.bak_时间戳` 目录覆盖回 `profiles.yaml` / `verge.yaml` / `config.yaml`，删除 `profiles\pclan.yaml`。
+- 客户端（toci）：`tun_config.bak_时间戳.json` 覆盖回 `tun_config.json` 并在 GUI 重新应用；或直接关掉 TUN 开关，`SNI-Proxy-TUN` 网卡随之消失。

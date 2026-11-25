@@ -1,14 +1,15 @@
 ﻿# verify-share.ps1
 # 验证共享链路：端口可达 → 认证生效 → (可选) TUN 接管。
-# 用法: powershell -ExecutionPolicy Bypass -File verify-share.ps1 -Server 192.168.112.32 -Password 密码 -CheckTun
+# 用法: powershell -ExecutionPolicy Bypass -File verify-share.ps1 -Server 192.168.1.10 -Password 密码 -CheckTun -TunName SNI-Proxy-TUN
 
 param(
     [Parameter(Mandatory = $true)][string]$Server,
     [int]$Port = 18080,
     [int]$SocksPort = 18081,
-    [string]$User = 'b404',
+    [string]$User = 'shareuser',
     [Parameter(Mandatory = $true)][string]$Password,
-    [switch]$CheckTun
+    [switch]$CheckTun,
+    [string]$TunName = 'Meta'
 )
 
 $results = [System.Collections.ArrayList]::new()
@@ -44,11 +45,12 @@ Add-Result '认证后出网' $authOk $(if ($authOk) { 'HTTP 200' } else { '账�
 
 # ---- 4. TUN 接管（客户端本机） ----
 if ($CheckTun) {
-    $tun = Get-NetAdapter -Name 'Meta' -ErrorAction SilentlyContinue
-    Add-Result 'TUN 网卡 Meta Up' ($tun -and $tun.Status -eq 'Up') $(if ($tun) { $tun.Status } else { '未创建，检查 Clash Verge 服务模式与 TUN 开关' })
+    $tun = Get-NetAdapter -Name $TunName -ErrorAction SilentlyContinue
+    Add-Result "TUN 网卡 $TunName Up" ($tun -and $tun.Status -eq 'Up') $(if ($tun) { $tun.Status } else { '未创建：检查 TUN 开关与服务模式（Clash 用 Meta，toci 用 SNI-Proxy-TUN）' })
 
-    $route = Get-NetRoute -InterfaceAlias 'Meta' -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue
-    Add-Result '默认路由指向 TUN' ($null -ne $route) $(if ($route) { "NextHop=$($route.NextHop)" } else { '无默认路由' })
+    $tunRoutes = Get-NetRoute -InterfaceAlias $TunName -ErrorAction SilentlyContinue
+    $cover = $tunRoutes | Where-Object { $_.DestinationPrefix -in @('0.0.0.0/0', '0.0.0.0/1', '0.0.0.0/5', '128.0.0.0/1') }
+    Add-Result '公网流量已进 TUN' ($null -ne $cover) $(if ($cover) { ($cover | Select-Object -First 2 -ExpandProperty DestinationPrefix) -join ', ' } else { 'TUN 上无公网路由，未接管' })
 
     $dnsIp = (Resolve-DnsName 'www.baidu.com' -Type A -ErrorAction SilentlyContinue | Where-Object IPAddress | Select-Object -First 1).IPAddress
     Add-Result 'DNS fake-ip 生效' ($dnsIp -like '198.18.*') "$dnsIp"

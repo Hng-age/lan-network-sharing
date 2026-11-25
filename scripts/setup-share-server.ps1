@@ -1,16 +1,19 @@
 ﻿# setup-share-server.ps1
 # 在提供网络的 Windows 机器上搭建带认证的 HTTP/SOCKS5 代理，并注册登录自启。
-# 用法: powershell -ExecutionPolicy Bypass -File setup-share-server.ps1 -User b404
+# 用法: powershell -ExecutionPolicy Bypass -File setup-share-server.ps1 -User shareuser
+# 程序目录默认落在 D 盘（D:\Doubao\tools\gost），没有 D 盘才回退到 LOCALAPPDATA。
 
 param(
     [int]$Port = 18080,
     [int]$SocksPort = 18081,
-    [string]$User = 'b404',
+    [string]$User = 'shareuser',
     [string]$Password,
     [string]$TaskName = 'LAN Proxy (gost)',
     [string]$RuleName = 'LAN Proxy (gost)',
-    [string]$InstallDir = "$env:LOCALAPPDATA\lan-share\gost",
-    [string]$AllowCidr
+    [string]$InstallDir,
+    [string]$AllowCidr,
+    [switch]$NoAutoStart,
+    [switch]$AtStartup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,9 +21,12 @@ $ErrorActionPreference = 'Stop'
 # ---- 自动提权 ----
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-    $argLine = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Port $Port -SocksPort $SocksPort -User `"$User`""
+    $argLine = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -Port $Port -SocksPort $SocksPort -User `"$User`" -TaskName `"$TaskName`" -RuleName `"$RuleName`""
     if ($Password) { $argLine += " -Password `"$Password`"" }
+    if ($InstallDir) { $argLine += " -InstallDir `"$InstallDir`"" }
     if ($AllowCidr) { $argLine += " -AllowCidr `"$AllowCidr`"" }
+    if ($NoAutoStart) { $argLine += ' -NoAutoStart' }
+    if ($AtStartup) { $argLine += ' -AtStartup' }
     Write-Host '需要管理员权限，正在请求提权...'
     Start-Process powershell -Verb RunAs -ArgumentList $argLine
     exit 0
@@ -37,7 +43,15 @@ function Get-CidrString([string]$Ip, [int]$Prefix) {
     return (($net -join '.') + "/$Prefix")
 }
 
-# ---- 1. 准备目录与程序 ----
+# ---- 1. 准备目录与程序（默认落 D 盘，避免占系统盘） ----
+if (-not $InstallDir) {
+    if (Test-Path 'D:\') { $InstallDir = 'D:\Doubao\tools\gost' }
+    else {
+        $InstallDir = "$env:LOCALAPPDATA\lan-share\gost"
+        Write-Warning '未检测到 D 盘，回退到 LOCALAPPDATA；如需固定到 D 盘请先分区或用 -InstallDir 指定。'
+    }
+}
+Write-Host ("程序目录        : {0}" -f $InstallDir)
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 $exe = Join-Path $InstallDir 'gost.exe'
 
@@ -90,20 +104,36 @@ if (Get-Process gost -ErrorAction SilentlyContinue) { exit 0 }
 & "`$dir\gost.exe" -L "http://${User}:`$pass@:${Port}" -L "socks5://${User}:`$pass@:${SocksPort}" *>> "`$dir\proxy.log"
 "@ | Set-Content -LiteralPath $startScript -Encoding utf8
 
-# ---- 5. 计划任务：登录后自动启动 ----
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-    -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startScript`""
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-    -Principal $principal -Description "局域网网络共享代理 $Port(HTTP)/$SocksPort(SOCKS5)" -Force | Out-Null
+# ---- 5. 计划任务：登录后自动启动（-NoAutoStart 可跳过） ----
+if (-not $NoAutoStart) {
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+        -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startScript`""
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    if ($AtStartup) {
+        # 开机即起，不等用户登录（SYSTEM 身份，日志仍写 D 盘目录）
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $desc = "局域网网络共享代理 $Port(HTTP)/$SocksPort(SOCKS5)（开机启动）"
+    } else {
+        $trigger = New-ScheduledTaskTrigger -AtLogOn
+        $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+        $desc = "局域网网络共享代理 $Port(HTTP)/$SocksPort(SOCKS5)（登录启动）"
+    }
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
+        -Principal $principal -Description $desc -Force | Out-Null
+} else {
+    Write-Host '已跳过开机自启注册（-NoAutoStart）。需要时手动运行 start-proxy.ps1。'
+}
 
 # ---- 6. 启动并自测 ----
 Get-Process gost -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
-Start-ScheduledTask -TaskName $TaskName
+if ($NoAutoStart) {
+    Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+} else {
+    Start-ScheduledTask -TaskName $TaskName
+}
 Start-Sleep -Seconds 5
 
 function Test-Tcp([string]$Target, [int]$P) {
@@ -137,7 +167,7 @@ Write-Host ("HTTP 代理      : {0}:{1}" -f $localIp, $Port)
 Write-Host ("SOCKS5 代理    : {0}:{1} (支持 UDP)" -f $localIp, $SocksPort)
 Write-Host ("账号 / 密码    : {0} / {1}" -f $User, $Password)
 Write-Host ("仅允许网段     : {0}" -f $AllowCidr)
-Write-Host ("计划任务       : {0}" -f $TaskName)
+Write-Host ("计划任务       : {0}" -f $(if ($NoAutoStart) { '未注册（-NoAutoStart）' } else { $TaskName }))
 Write-Host ("防火墙规则     : {0}" -f $RuleName)
 Write-Host ("程序目录       : {0}" -f $InstallDir)
 Write-Host '--------------------------------------------------------'

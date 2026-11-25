@@ -1,12 +1,12 @@
 ﻿# setup-client-clash.ps1
 # 在客户端 Windows 上，把共享代理接进 Clash Verge 并开启 TUN，让 App 流量也走代理。
-# 用法: powershell -ExecutionPolicy Bypass -File setup-client-clash.ps1 -Server 192.168.112.32 -Password 密码
+# 用法: powershell -ExecutionPolicy Bypass -File setup-client-clash.ps1 -Server 192.168.1.10 -Password 密码
 
 param(
     [Parameter(Mandatory = $true)][string]$Server,
     [int]$Port = 18080,
     [int]$SocksPort = 18081,
-    [string]$User = 'b404',
+    [string]$User = 'shareuser',
     [Parameter(Mandatory = $true)][string]$Password,
     [string]$ProfileName = '台式机共享代理',
     [string]$VergeExe,
