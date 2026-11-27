@@ -20,6 +20,7 @@
 | `协议探测失败: timed out`（toci 界面上） | 协议与端口错配：SOCKS5 填了 HTTP 端口，或 HTTP 填了 SOCKS5 端口；也可能服务端没开/跨网段 | SOCKS5 配 18081、HTTP 配 18080；先 `Test-NetConnection IP -Port 18081` 确认端口通 |
 | toci 点了“保存配置并应用”但没 `SNI-Proxy-TUN` 网卡 | 线路没选中、延迟测试没过、或需要管理员权限建虚拟网卡 | 先“测试连通性与认证”看到 ms 延迟再应用；用管理员身份启动 toci |
 | toci 应用后网页全挂 | 与 Clash 的 `Meta` TUN 同时存在，抢路由/系统代理 | 只留一个 TUN：关掉 Clash Verge 的 TUN（或退出 Verge 并停 `clash_verge_service`） |
+| 计划任务显示“正在运行”但 `Get-Process gost` 没有进程，`proxy.log` 里只有“拒绝访问” | 启动入口是 powershell，以 SYSTEM 身份运行时写服务端磁盘日志被系统拒绝，gost 直接没起来（任务结果常见 `0xFFFFFFFF`） | 把任务动作换成 `cmd.exe /c run-proxy.cmd`（本包已内置该写法）；或把日志目录换成 SYSTEM 可写的路径 |
 
 ## 按场景
 

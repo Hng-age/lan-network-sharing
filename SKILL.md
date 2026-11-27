@@ -48,8 +48,18 @@ powershell -ExecutionPolicy Bypass -File scripts\setup-share-server.ps1 -NoAutoS
 关键设计（不要擅自改动）：
 - 监听 `0.0.0.0`，但**必须带认证**，否则同网段任何人都能借用出口。
 - 防火墙规则把来源限制在服务端当前网段（如 `192.168.1.0/24`），跨网段直接连不上，比加认证更可靠。
-- 自启走计划任务 + 启动脚本从 `pass.txt` 读密码，避免密码出现在命令行和任务参数里。三种模式：默认 `AtLogOn`（登录后起）；`-AtStartup`（开机就起，SYSTEM 身份，不用登录）；`-NoAutoStart`（不注册，手动跑 `start-proxy.ps1`）。
+- 自启走计划任务 + 启动脚本从 `pass.txt` 读密码，避免密码出现在命令行和任务参数里。三种模式：默认 `AtLogOn`（登录后起）；`-AtStartup`（开机就起，SYSTEM 身份，不用登录）；`-NoAutoStart`（不注册，手动跑 `run-proxy.cmd`）。
+- 启动入口用 **cmd（`run-proxy.cmd`）**，不要用 powershell 包一层：部分机器上以 SYSTEM 身份运行时 powershell 写 D 盘日志会被系统拒绝，日志里只剩“拒绝访问”，任务结果 `0xFFFFFFFF`，表现为“任务在跑但 gost 没起”。cmd + `start /b` 没这个问题。
 - 程序、日志、密码文件全部留在 D 盘目录里，卸载时删一个目录就干净了。
+
+## 还原型机器（C 盘每次开机恢复原样）
+
+机房、云桌面、考试机常带 C 盘还原策略，于是**计划任务、防火墙规则、Run 注册项全都会跟着 C 盘一起被抹掉**：表现为“重启后手机连不上、gost 没起”，但 D 盘里的程序和密码都还在。这种情况下不存在真正意义上的“开机自动启动”，只能把重建动作做成一次双击：
+
+1. 首次部署照旧（程序、`pass.txt`、日志全在 D 盘）。
+2. 在 D 盘目录放 `启动共享代理.cmd`，内容就是 `powershell -ExecutionPolicy Bypass -File 恢复共享代理.ps1`；再用 `scripts/recovery-start.ps1` 生成它：检测防火墙规则与计划任务 → 缺失则按 `cmd.exe /c run-proxy.cmd`（`AtStartup` / SYSTEM）重建 → 拉起 gost → 自检 407/200 → 弹窗显示当前 IP 与账号密码。
+3. 还原到底在什么时机触发要实测，别凭猜：在 C 盘几个典型位置（`C:\` 根、`C:\Windows`、`C:\Windows\System32\Tasks`、用户目录、`C:\ProgramData`、`C:\Program Files` 某软件目录）各放一个带时间戳的标记文件，再挂 4 种自启（计划任务 / HKLM Run / HKCU Run / 启动文件夹），重启或关机再开机后看哪些还在、哪些命中文件被写出来。常见结论是“普通重启不还原、关机再开机才还原”，此时只要不真正关机就一直有效。
+4. 还原生效后第一次开机必然要双击一次，弹窗里的 IP 才是准的（DHCP 可能换地址），手机端按新 IP 改。
 
 ## 客户端：让浏览器和 App 都走代理
 

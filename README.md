@@ -23,6 +23,8 @@ scripts/
   setup-client-toci.ps1           # 客户端：改 toci 的 tun_config.json（SOCKS5 + DIRECT 规则）
   setup-client-clash.ps1          # 客户端：生成 Clash Verge 配置并开 TUN/系统代理
   verify-share.ps1                # 两端验证：端口、407/200 认证、TUN 接管（8 项）
+  recovery-start.ps1              # 还原型机器：重建防火墙/计划任务、拉起 gost、自检弹窗
+README-PACKAGE.md                 # 分发包说明（包内容、服务端用法、本次修订点）
 ```
 
 ## 快速开始
@@ -74,6 +76,10 @@ powershell -ExecutionPolicy Bypass -File scripts\verify-share.ps1 -Server <IP> -
 2. **客户端必须与服务端同网段**。校园网/宿舍网的 AP 客户端隔离会让同 SSID 设备也互访不通。
 3. **服务端必须开机**；默认 `AtLogOn` 模式还要求已登录（用 `-AtStartup` 可免登录）。
 4. 上游按账号/设备数计费时，他人流量记在共享者账号上；校园网多设备共享可能违反使用协议，请自行权衡。
+
+## 还原型机器（C 盘每次开机恢复原样）
+
+机房/云桌面/考试机常带 C 盘还原策略，计划任务、防火墙规则、Run 注册项会随 C 盘一起被抹掉，表现为「重启后连不上、gost 没起」，但 D 盘的程序和 `pass.txt` 还在。这类机器没有真正的开机自启，用 `scripts/recovery-start.ps1` 把「重建规则 + 拉起 gost + 自检」做成一次双击即可（详见 `SKILL.md` 对应章节）。
 
 ## 清理与回滚
 

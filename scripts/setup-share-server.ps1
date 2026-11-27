@@ -95,19 +95,23 @@ Get-NetFirewallRule -DisplayName $RuleName -ErrorAction SilentlyContinue | Remov
 New-NetFirewallRule -DisplayName $RuleName -Direction Inbound -Action Allow -Protocol TCP `
     -LocalPort $Port, $SocksPort -RemoteAddress $AllowCidr -Profile Any | Out-Null
 
-# ---- 4. 启动脚本（密码从文件读，不进命令行） ----
-$startScript = Join-Path $InstallDir 'start-proxy.ps1'
+# ---- 4. 启动脚本（cmd 版：密码从 pass.txt 读，不进命令行；避免 powershell 以 SYSTEM 写日志被拒） ----
+$startScript = Join-Path $InstallDir 'run-proxy.cmd'
 @"
-`$dir = `$PSScriptRoot
-`$pass = (Get-Content "`$dir\pass.txt" -Raw).Trim()
-if (Get-Process gost -ErrorAction SilentlyContinue) { exit 0 }
-& "`$dir\gost.exe" -L "http://${User}:`$pass@:${Port}" -L "socks5://${User}:`$pass@:${SocksPort}" *>> "`$dir\proxy.log"
-"@ | Set-Content -LiteralPath $startScript -Encoding utf8
+@echo off
+rem 由开机任务调用：从 pass.txt 读密码后后台启动 gost，日志追加到 proxy.log
+setlocal
+set "DIR=%~dp0"
+set /p PASS=<"%DIR%pass.txt"
+tasklist /fi "imagename eq gost.exe" 2>nul | find /i "gost.exe" >nul && exit /b 0
+start "" /b "%DIR%gost.exe" -L "http://${User}:%PASS%@:${Port}" -L "socks5://${User}:%PASS%@:${SocksPort}" >> "%DIR%proxy.log" 2>&1
+endlocal
+"@ | Set-Content -LiteralPath $startScript -Encoding ascii
 
 # ---- 5. 计划任务：登录后自动启动（-NoAutoStart 可跳过） ----
 if (-not $NoAutoStart) {
-    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$startScript`""
+    $action = New-ScheduledTaskAction -Execute 'cmd.exe' `
+        -Argument "/c `"$startScript`"" -WorkingDirectory $InstallDir
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
     if ($AtStartup) {
@@ -123,16 +127,21 @@ if (-not $NoAutoStart) {
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
         -Principal $principal -Description $desc -Force | Out-Null
 } else {
-    Write-Host '已跳过开机自启注册（-NoAutoStart）。需要时手动运行 start-proxy.ps1。'
+    Write-Host '已跳过开机自启注册（-NoAutoStart）。需要时手动运行 run-proxy.cmd。'
 }
 
 # ---- 6. 启动并自测 ----
 Get-Process gost -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 if ($NoAutoStart) {
-    Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$startScript`""
+    Start-Process -FilePath 'cmd.exe' -ArgumentList "/c `"$startScript`"" -WindowStyle Hidden
 } else {
     Start-ScheduledTask -TaskName $TaskName
+    Start-Sleep -Seconds 3
+    if (-not (Get-Process gost -ErrorAction SilentlyContinue)) {
+        Write-Warning '计划任务未拉起 gost，改用 run-proxy.cmd 直接启动'
+        Start-Process -FilePath 'cmd.exe' -ArgumentList "/c `"$startScript`"" -WindowStyle Hidden
+    }
 }
 Start-Sleep -Seconds 5
 
